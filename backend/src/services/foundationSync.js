@@ -4,8 +4,8 @@ const config = {
   server: process.env.FOUNDATION_SERVER?.split(',')[0] || 'sql.foundationsoft.com',
   port: parseInt(process.env.FOUNDATION_SERVER?.split(',')[1] || '9000'),
   database: process.env.FOUNDATION_DATABASE || 'Cas_15082',
-  user: process.env.FOUNDATION_USER,
-  password: process.env.FOUNDATION_PASSWORD,
+  user: process.env.FOUNDATION_USER?.trim(),
+  password: process.env.FOUNDATION_PASSWORD?.trim(),
   options: { encrypt: false, trustServerCertificate: true },
   pool: { max: 5, idleTimeoutMillis: 30000 },
 };
@@ -32,10 +32,8 @@ async function inspectSchema() {
   return result.recordset;
 }
 
-// Labor cost classes per business rules: 1,3,5,6,7,9
 const LABOR_CLASSES = ['1', '3', '5', '6', '7', '9'];
 
-// Pull actual costs from v_job_history grouped by cost code
 async function fetchFoundationActuals(jobNumber) {
   const p = await getPool();
   const laborList = LABOR_CLASSES.map(c => `'${c}'`).join(',');
@@ -57,7 +55,6 @@ async function fetchFoundationActuals(jobNumber) {
   return result.recordset;
 }
 
-// Pull change order budget adjustments from job_chg_budgets
 async function fetchChangeOrders(jobNumber) {
   const p = await getPool();
   const result = await p.request()
@@ -75,7 +72,6 @@ async function fetchChangeOrders(jobNumber) {
   return result.recordset;
 }
 
-// Sync Foundation actuals into cost_code_lines for dashboard display
 async function syncJob(supabase, jobId, jobNumber, userId) {
   let rowsUpdated = 0;
   let errorText = null;
