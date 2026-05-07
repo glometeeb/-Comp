@@ -5,11 +5,13 @@ async function authHeaders() {
   return { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' };
 }
 
+const BASE = import.meta.env.VITE_API_URL || '';
+
 async function request(method, path, body) {
   const headers = await authHeaders();
   const opts = { method, headers };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(`/api${path}`, opts);
+  const res = await fetch(`${BASE}/api${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
@@ -45,7 +47,7 @@ export const api = {
     form.append('file', file);
     form.append('job_name', jobName);
     form.append('job_number', jobNumber);
-    const res = await fetch('/api/upload', {
+    const res = await fetch(`${BASE}/api/upload`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${session?.access_token}` },
       body: form,
