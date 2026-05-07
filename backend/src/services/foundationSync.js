@@ -1,19 +1,33 @@
 const sql = require('mssql');
 
-const config = {
-  server: process.env.FOUNDATION_SERVER?.split(',')[0] || 'sql.foundationsoft.com',
-  port: parseInt(process.env.FOUNDATION_SERVER?.split(',')[1] || '9000'),
-  database: process.env.FOUNDATION_DATABASE || 'Cas_15082',
-  user: process.env.FOUNDATION_USER?.trim(),
-  password: process.env.FOUNDATION_PASSWORD?.trim(),
-  options: { encrypt: false, trustServerCertificate: true },
-  pool: { max: 5, idleTimeoutMillis: 30000 },
-};
+function buildConfig() {
+  const server = (process.env.FOUNDATION_SERVER || 'sql.foundationsoft.com,9000').trim();
+  const parts = server.split(',');
+  return {
+    server: parts[0].trim(),
+    port: parseInt(parts[1]?.trim() || '9000'),
+    database: (process.env.FOUNDATION_DATABASE || 'Cas_15082').trim(),
+    user: (process.env.FOUNDATION_USER || '').trim(),
+    password: (process.env.FOUNDATION_PASSWORD || '').trim(),
+    options: { encrypt: false, trustServerCertificate: true },
+    connectionTimeout: 15000,
+    requestTimeout: 30000,
+  };
+}
 
 let pool = null;
 
 async function getPool() {
-  if (!pool) pool = await sql.connect(config);
+  // If pool exists and is connected, reuse it
+  if (pool && pool.connected) return pool;
+
+  // Otherwise close any broken pool and reconnect
+  if (pool) {
+    try { await pool.close(); } catch (_) {}
+    pool = null;
+  }
+
+  pool = await sql.connect(buildConfig());
   return pool;
 }
 
@@ -21,15 +35,6 @@ async function testConnection() {
   const p = await getPool();
   const result = await p.request().query('SELECT 1 AS ok');
   return result.recordset[0];
-}
-
-async function inspectSchema() {
-  const p = await getPool();
-  const result = await p.request().query(`
-    SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'v_job_history' ORDER BY ORDINAL_POSITION
-  `);
-  return result.recordset;
 }
 
 const LABOR_CLASSES = ['1', '3', '5', '6', '7', '9'];
@@ -41,11 +46,11 @@ async function fetchFoundationActuals(jobNumber) {
     .input('jobNumber', sql.VarChar, jobNumber.trim())
     .query(`
       SELECT
-        REPLACE(RTRIM(cost_code_no), '-', '')   AS cost_code,
-        MAX(cost_code_description)               AS description,
+        REPLACE(RTRIM(cost_code_no), '-', '') AS cost_code,
+        MAX(cost_code_description)            AS description,
         SUM(CASE WHEN cost_class_id IN (${laborList}) THEN cost ELSE 0 END) AS labor_cost,
         SUM(CASE WHEN cost_class_id NOT IN (${laborList}) THEN cost ELSE 0 END) AS other_cost,
-        SUM(cost)                                AS total_cost
+        SUM(cost) AS total_cost
       FROM v_job_history
       WHERE RTRIM(job_no) = @jobNumber
         AND record_status = 'A'
@@ -62,7 +67,7 @@ async function fetchChangeOrders(jobNumber) {
     .query(`
       SELECT
         REPLACE(RTRIM(cost_code_no), '-', '') AS cost_code,
-        SUM(cost_adj)                          AS co_adj
+        SUM(cost_adj) AS co_adj
       FROM job_chg_budgets
       WHERE RTRIM(job_no) = @jobNumber
         AND record_status = 'A'
@@ -114,6 +119,8 @@ async function syncJob(supabase, jobId, jobNumber, userId) {
       rowsUpdated++;
     }
   } catch (err) {
+    // Reset pool on connection errors so next request reconnects fresh
+    pool = null;
     errorText = err.message;
   }
 
@@ -127,4 +134,4 @@ async function syncJob(supabase, jobId, jobNumber, userId) {
   return { rowsUpdated, errors: errorText };
 }
 
-module.exports = { testConnection, inspectSchema, syncJob, fetchFoundationActuals, fetchChangeOrders };
+module.exports = { testConnection, syncJob, fetchFoundationActuals, fetchChangeOrders };

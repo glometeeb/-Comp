@@ -2,29 +2,9 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const { requireAuth, requireEditor } = require('../middleware/auth');
-const { syncJob, testConnection, inspectSchema } = require('../services/foundationSync');
+const { syncJob, testConnection } = require('../services/foundationSync');
 
 router.use(requireAuth);
-
-// GET /api/foundation/test — verify SQL Server connectivity
-router.get('/foundation/test', requireEditor, async (req, res) => {
-  try {
-    await testConnection();
-    res.json({ ok: true, message: 'Connected to Foundation SQL Server successfully' });
-  } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
-  }
-});
-
-// GET /api/foundation/schema — inspect jc* tables to confirm column names
-router.get('/foundation/schema', requireEditor, async (req, res) => {
-  try {
-    const schema = await inspectSchema();
-    res.json(schema);
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
 
 // POST /api/jobs/:id/sync — trigger Foundation sync
 router.post('/:id/sync', requireEditor, async (req, res) => {
@@ -39,13 +19,16 @@ router.post('/:id/sync', requireEditor, async (req, res) => {
 
   try {
     const result = await syncJob(supabase, job.id, job.job_number, req.user.id);
-    res.json(result);
+    if (result.errors) {
+      return res.status(502).json({ error: result.errors, rowsUpdated: result.rowsUpdated });
+    }
+    res.json({ success: true, rowsUpdated: result.rowsUpdated });
   } catch (err) {
     res.status(502).json({ error: `Foundation sync failed: ${err.message}` });
   }
 });
 
-// GET /api/jobs/:id/sync-log — sync history
+// GET /api/jobs/:id/sync-log
 router.get('/:id/sync-log', async (req, res) => {
   const { data, error } = await supabase
     .from('sync_log')
@@ -55,6 +38,16 @@ router.get('/:id/sync-log', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// GET /api/foundation/test
+router.get('/foundation/test', requireEditor, async (req, res) => {
+  try {
+    await testConnection();
+    res.json({ ok: true, message: 'Connected to Foundation SQL Server successfully' });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
 });
 
 module.exports = router;
