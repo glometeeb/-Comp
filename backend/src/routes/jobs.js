@@ -40,7 +40,9 @@ router.get('/', async (req, res) => {
 // POST /api/jobs
 router.post('/', requireEditor, async (req, res) => {
   const { job_name, job_number } = req.body;
-  if (!job_number?.trim()) return res.status(400).json({ error: 'Job number is required' });
+  if (!job_number || !job_number.trim()) {
+    return res.status(400).json({ error: 'Job number is required' });
+  }
 
   const { data, error } = await supabase
     .from('jobs')
@@ -95,7 +97,6 @@ router.get('/:id', async (req, res) => {
 
 // GET /api/jobs/:id/foundation — live Foundation actuals vs budget
 router.get('/:id/foundation', async (req, res) => {
-  // 1. Get job
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
     .select('id, job_number')
@@ -103,14 +104,12 @@ router.get('/:id/foundation', async (req, res) => {
     .single();
   if (jobErr) return res.status(404).json({ error: 'Job not found' });
 
-  // 2. Get all budget lines across all phases for this job
   const { data: lines, error: linesErr } = await supabase
     .from('cost_code_lines')
     .select('cost_code, description, type, budget_amount, phase_id, phases!inner(job_id)')
     .eq('phases.job_id', req.params.id);
   if (linesErr) return res.status(500).json({ error: linesErr.message });
 
-  // 3. Sum original budgets by cost_code across ALL phases
   const budgetByCode = {};
   for (const line of lines || []) {
     const code = line.cost_code;
@@ -120,24 +119,20 @@ router.get('/:id/foundation', async (req, res) => {
     budgetByCode[code].original_budget += parseFloat(line.budget_amount) || 0;
   }
 
-  // 4. Pull live data from Foundation
   let foundationRows = [];
   let changeOrderRows = [];
   let foundationError = null;
 
   try {
-    [foundationRows, changeOrderRows] = await Promise.all([
-      fetchFoundationActuals(job.job_number),
-      fetchChangeOrders(job.job_number),
-    ]);
+    foundationRows = await fetchFoundationActuals(job.job_number);
+    changeOrderRows = await fetchChangeOrders(job.job_number);
   } catch (err) {
     foundationError = err.message;
   }
 
-  // 5. Build lookup maps
   const foundationByCode = {};
   for (const r of foundationRows) {
-    const code = r.cost_code?.trim();
+    const code = (r.cost_code || '').trim();
     if (!code) continue;
     foundationByCode[code] = {
       description: r.description,
@@ -147,12 +142,11 @@ router.get('/:id/foundation', async (req, res) => {
 
   const coByCode = {};
   for (const r of changeOrderRows) {
-    const code = r.cost_code?.trim();
+    const code = (r.cost_code || '').trim();
     if (!code) continue;
     coByCode[code] = (coByCode[code] || 0) + (parseFloat(r.co_adj) || 0);
   }
 
-  // 6. Union all cost codes
   const allCodes = new Set([
     ...Object.keys(budgetByCode),
     ...Object.keys(foundationByCode),
@@ -163,16 +157,45 @@ router.get('/:id/foundation', async (req, res) => {
     .map(code => {
       const budget = budgetByCode[code];
       const found = foundationByCode[code];
-      const originalBudget = budget?.original_budget || 0;
+      const originalBudget = budget ? budget.original_budget : 0;
       const coAdj = coByCode[code] || 0;
       const currentBudget = originalBudget + coAdj;
-      const foundationActual = found?.foundation_actual || 0;
+      const foundationActual = found ? found.foundation_actual : 0;
       const remaining = currentBudget - foundationActual;
       return {
         cost_code: code,
-        description: budget?.description || found?.description || '',
+        description: (budget ? budget.description : null) || (found ? found.description : null) || '',
         original_budget: Math.round(originalBudget * 100) / 100,
         co_adj: Math.round(coAdj * 100) / 100,
         current_budget: Math.round(currentBudget * 100) / 100,
         foundation_actual: Math.round(foundationActual * 100) / 100,
-        remaining: Math.round(remainin
+        remaining: Math.round(remaining * 100) / 100,
+      };
+    })
+    .sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+
+  const totals = { original_budget: 0, co_adj: 0, current_budget: 0, foundation_actual: 0, remaining: 0 };
+  for (const r of rows) {
+    totals.original_budget += r.original_budget;
+    totals.co_adj += r.co_adj;
+    totals.current_budget += r.current_budget;
+    totals.foundation_actual += r.foundation_actual;
+    totals.remaining += r.remaining;
+  }
+  totals.original_budget = Math.round(totals.original_budget * 100) / 100;
+  totals.co_adj = Math.round(totals.co_adj * 100) / 100;
+  totals.current_budget = Math.round(totals.current_budget * 100) / 100;
+  totals.foundation_actual = Math.round(totals.foundation_actual * 100) / 100;
+  totals.remaining = Math.round(totals.remaining * 100) / 100;
+
+  res.json({ rows, totals, foundationError });
+});
+
+// DELETE /api/jobs/:id
+router.delete('/:id', requireEditor, async (req, res) => {
+  const { error } = await supabase.from('jobs').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(204).end();
+});
+
+module.exports = router;
