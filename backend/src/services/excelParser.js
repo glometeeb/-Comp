@@ -1,49 +1,20 @@
- const XLSX = require('xlsx');
+const XLSX = require('xlsx');
 
-const SKIP_PATTERNS = /^(total|scope:|phase:)$/i;
+const SKIP_PATTERNS = /^(total|scope:|phase:|cost\s*code)$/i;
 const SKIP_SHEETS = /^(summary|total|cover|index)$/i;
 const COST_CODE_RE = /^(\d{4})\s+(.+)$/;
-
-function extractPhaseName(rows, sheetName) {
-  // Try col C row 0 — must be a real name, not a cost code reference
-  const colC0 = String(rows[0]?.[2] || '').trim();
-  if (colC0 && !/^cost\s*\d*/i.test(colC0) && !/^(scope:|phase:|budget)$/i.test(colC0)) {
-    return colC0;
-  }
-
-  // Try col A row 0 — strip trailing "- Cost XX" if present
-  const colA0 = String(rows[0]?.[0] || '').trim();
-  if (colA0 && !/^(scope:|phase:|budget)$/i.test(colA0)) {
-    return colA0.replace(/\s*-?\s*Cost\s*\d+\s*$/i, '').trim();
-  }
-
-  // Fall back to sheet tab name
-  return sheetName;
-}
 
 function parseSheet(sheet, sheetName) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-  const phaseName = extractPhaseName(rows, sheetName);
-
-  // Extract phase code from rows 0-1, col C
-  let phaseCode = null;
-  for (let i = 0; i < 2; i++) {
-    const cell = String(rows[i]?.[2] || '');
-    const m = /Cost\s*(\d+)/i.exec(cell);
-    if (m) { phaseCode = m[1]; break; }
-  }
-  // Also check col A row 0 for phase code
-  if (!phaseCode) {
-    const m = /Cost\s*(\d+)/i.exec(String(rows[0]?.[0] || ''));
-    if (m) phaseCode = m[1];
-  }
+  // Phase name is always the sheet tab name now
+  const phaseName = sheetName.trim();
 
   // Find header row containing 'BUDGET'
   let headerIdx = rows.findIndex(row =>
     row.some(cell => String(cell).toUpperCase().includes('BUDGET'))
   );
-  if (headerIdx === -1) headerIdx = 2;
+  if (headerIdx === -1) headerIdx = 0;
 
   const dataRows = rows.slice(headerIdx + 1);
   const lines = [];
@@ -73,7 +44,7 @@ function parseSheet(sheet, sheetName) {
     });
   }
 
-  return { phaseName, phaseCode, lines, unmappedRows };
+  return { phaseName, phaseCode: null, lines, unmappedRows };
 }
 
 function parseWorkbook(buffer) {
