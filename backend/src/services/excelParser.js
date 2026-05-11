@@ -1,6 +1,7 @@
 const XLSX = require('xlsx');
 
 const SKIP_PATTERNS = /^(total|scope:|phase:)$/i;
+const SKIP_SHEETS = /^(summary|total|cover|index)$/i;
 const COST_CODE_RE = /^(\d{4})\s+(.+)$/;
 
 function parseSheet(sheet, sheetName) {
@@ -63,11 +64,13 @@ function parseWorkbook(buffer) {
   const phases = [];
   const unmappedRows = [];
 
-  workbook.SheetNames.forEach((name, idx) => {
+  const filteredSheets = workbook.SheetNames.filter(name => !SKIP_SHEETS.test(name.trim()));
+
+  filteredSheets.forEach((name, idx) => {
     const sheet = workbook.Sheets[name];
     const result = parseSheet(sheet, name);
     result.sort_order = idx;
-    result.isSinglePhase = workbook.SheetNames.length === 1;
+    result.isSinglePhase = filteredSheets.length === 1;
     phases.push(result);
     unmappedRows.push(...(result.unmappedRows || []));
   });
