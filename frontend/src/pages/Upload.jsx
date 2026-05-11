@@ -9,13 +9,14 @@ export default function Upload() {
   const [preview, setPreview] = useState(null);
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
-  const [step, setStep] = useState('form'); // form | preview | confirming
+  const [step, setStep] = useState('form');
   const inputRef = useRef();
   const navigate = useNavigate();
 
   async function handleParse(e) {
     e.preventDefault();
     if (!file) return;
+    if (!jobNumber.trim()) { setError('Job number is required'); return; }
     setError('');
     setStep('confirming');
     try {
@@ -68,13 +69,18 @@ export default function Upload() {
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Job Number <span className="text-red-500">*</span>
+            </label>
+            <input type="text" required value={jobNumber} onChange={e => setJobNumber(e.target.value)}
+              placeholder="e.g. K2852"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-xs text-gray-400 mt-1">Must match the job number in Foundation Software</p>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Job Name</label>
             <input type="text" required value={jobName} onChange={e => setJobName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Job Number <span className="text-gray-400">(optional)</span></label>
-            <input type="text" value={jobNumber} onChange={e => setJobNumber(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
@@ -88,7 +94,8 @@ export default function Upload() {
       ) : (
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow border border-gray-100 p-6">
-            <h2 className="font-semibold text-gray-700 mb-3">Detected Phases ({preview.phases.length})</h2>
+            <h2 className="font-semibold text-gray-700 mb-1">Detected Phases ({preview.phases.length})</h2>
+            <p className="text-xs text-gray-400 mb-3">Job #{jobNumber}</p>
             <table className="w-full text-sm text-gray-600">
               <thead className="text-xs text-gray-400 uppercase">
                 <tr><th className="text-left pb-2">Phase</th><th className="text-left pb-2">Code</th><th className="text-right pb-2">Lines</th></tr>
@@ -103,7 +110,7 @@ export default function Upload() {
 
           {preview.unmappedRows?.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <h3 className="font-semibold text-amber-700 mb-2">{preview.unmappedRows.length} unmapped row(s) — review before confirming</h3>
+              <h3 className="font-semibold text-amber-700 mb-2">{preview.unmappedRows.length} unmapped row(s)</h3>
               <ul className="text-sm text-amber-600 space-y-1">
                 {preview.unmappedRows.slice(0, 5).map((r, i) => (
                   <li key={i}>{r.reason}: {JSON.stringify(r.raw)}</li>

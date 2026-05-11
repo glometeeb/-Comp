@@ -2,16 +2,30 @@ const XLSX = require('xlsx');
 
 const SKIP_PATTERNS = /^(total|scope:|phase:)$/i;
 const COST_CODE_RE = /^(\d{4})\s+(.+)$/;
-const PHASE_CODE_RE = /Cost\s*(\d+)/i;
 
-function parseSheet(sheet, phaseName, phaseCode, isSinglePhase) {
+function parseSheet(sheet, sheetName) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  // Extract phase name — check col C of row 0 first, then col A
+  let phaseName = String(rows[0]?.[2] || '').trim();
+  if (!phaseName || /^cost\s*\d*/i.test(phaseName)) {
+    phaseName = String(rows[0]?.[0] || sheetName).trim();
+  }
+  if (!phaseName || /^(phase:|scope:)$/i.test(phaseName)) phaseName = sheetName;
+
+  // Extract phase code from rows 0-1, col C
+  let phaseCode = null;
+  for (let i = 0; i < 2; i++) {
+    const cell = String(rows[i]?.[2] || '');
+    const m = /Cost\s*(\d+)/i.exec(cell);
+    if (m) { phaseCode = m[1]; break; }
+  }
 
   // Find header row containing 'BUDGET'
   let headerIdx = rows.findIndex(row =>
     row.some(cell => String(cell).toUpperCase().includes('BUDGET'))
   );
-  if (headerIdx === -1) headerIdx = 2; // fallback
+  if (headerIdx === -1) headerIdx = 2;
 
   const dataRows = rows.slice(headerIdx + 1);
   const lines = [];
@@ -41,36 +55,22 @@ function parseSheet(sheet, phaseName, phaseCode, isSinglePhase) {
     });
   }
 
-  return { phaseName, phaseCode, isSinglePhase, lines };
+  return { phaseName, phaseCode, lines, unmappedRows };
 }
 
 function parseWorkbook(buffer) {
   const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const sheetNames = workbook.SheetNames;
   const phases = [];
   const unmappedRows = [];
 
-  if (sheetNames.length === 1) {
-    const sheet = workbook.Sheets[sheetNames[0]];
-    const result = parseSheet(sheet, sheetNames[0], null, true);
+  workbook.SheetNames.forEach((name, idx) => {
+    const sheet = workbook.Sheets[name];
+    const result = parseSheet(sheet, name);
+    result.sort_order = idx;
+    result.isSinglePhase = workbook.SheetNames.length === 1;
     phases.push(result);
     unmappedRows.push(...(result.unmappedRows || []));
-  } else {
-    sheetNames.forEach((name, idx) => {
-      const sheet = workbook.Sheets[name];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      // Try to extract phase name from A1 and phase code from rows 0-1
-      const titleCell = String(rows[0]?.[0] || name).trim();
-      const scopeText = [String(rows[0] || ''), String(rows[1] || '')].join(' ');
-      const codeMatch = PHASE_CODE_RE.exec(scopeText);
-      const phaseCode = codeMatch ? codeMatch[1] : null;
-
-      const result = parseSheet(sheet, titleCell || name, phaseCode, false);
-      result.sort_order = idx;
-      phases.push(result);
-      unmappedRows.push(...(result.unmappedRows || []));
-    });
-  }
+  });
 
   return { phases, unmappedRows };
 }
