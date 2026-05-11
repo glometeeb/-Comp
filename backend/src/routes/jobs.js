@@ -104,12 +104,23 @@ router.get('/:id/foundation', async (req, res) => {
     .single();
   if (jobErr) return res.status(404).json({ error: 'Job not found' });
 
+  // Step 1: get all phase IDs for this job
+  const { data: phases, error: phasesErr } = await supabase
+    .from('phases')
+    .select('id')
+    .eq('job_id', req.params.id);
+  if (phasesErr) return res.status(500).json({ error: phasesErr.message });
+
+  const phaseIds = (phases || []).map(p => p.id);
+
+  // Step 2: get all cost code lines for those phases
   const { data: lines, error: linesErr } = await supabase
     .from('cost_code_lines')
-    .select('cost_code, description, type, budget_amount, phase_id, phases!inner(job_id)')
-    .eq('phases.job_id', req.params.id);
+    .select('cost_code, description, type, budget_amount')
+    .in('phase_id', phaseIds);
   if (linesErr) return res.status(500).json({ error: linesErr.message });
 
+  // Step 3: sum budgets by cost code across all phases
   const budgetByCode = {};
   for (const line of lines || []) {
     const code = line.cost_code;
@@ -119,6 +130,7 @@ router.get('/:id/foundation', async (req, res) => {
     budgetByCode[code].original_budget += parseFloat(line.budget_amount) || 0;
   }
 
+  // Step 4: pull live Foundation data
   let foundationRows = [];
   let changeOrderRows = [];
   let foundationError = null;
@@ -130,6 +142,7 @@ router.get('/:id/foundation', async (req, res) => {
     foundationError = err.message;
   }
 
+  // Step 5: build lookup maps
   const foundationByCode = {};
   for (const r of foundationRows) {
     const code = (r.cost_code || '').trim();
@@ -147,6 +160,7 @@ router.get('/:id/foundation', async (req, res) => {
     coByCode[code] = (coByCode[code] || 0) + (parseFloat(r.co_adj) || 0);
   }
 
+  // Step 6: union all cost codes
   const allCodes = new Set([
     ...Object.keys(budgetByCode),
     ...Object.keys(foundationByCode),
@@ -174,6 +188,7 @@ router.get('/:id/foundation', async (req, res) => {
     })
     .sort((a, b) => a.cost_code.localeCompare(b.cost_code));
 
+  // Step 7: totals
   const totals = { original_budget: 0, co_adj: 0, current_budget: 0, foundation_actual: 0, remaining: 0 };
   for (const r of rows) {
     totals.original_budget += r.original_budget;
